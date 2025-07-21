@@ -21,4 +21,4 @@ jobs:
         run: npm run build
 
       - name: Run demo hydration
-        run: npx ssr-diag run demo
+        run: node dist/cli.js run demo
