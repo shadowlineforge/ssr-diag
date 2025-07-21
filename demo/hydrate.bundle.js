@@ -19305,7 +19305,7 @@ var import_client = __toESM(require_client());
 setTimeout(() => {
   (0, import_client.hydrateRoot)(
     document.getElementById("root"),
-    import_react.default.createElement("h1", null, "Hello CSR")
+    import_react.default.createElement("h1", null, "Client says Hello")
   );
 }, 100);
 /*! Bundled license information:
