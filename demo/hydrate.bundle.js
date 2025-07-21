@@ -19302,12 +19302,11 @@ var require_client = __commonJS({
 // demo/hydrate.js
 var import_react = __toESM(require_react());
 var import_client = __toESM(require_client());
-setTimeout(() => {
-  (0, import_client.hydrateRoot)(
-    document.getElementById("root"),
-    import_react.default.createElement("h1", null, "Client says Hello")
-  );
-}, 100);
+console.log("\u{1F6A8} demo hydration running");
+(0, import_client.hydrateRoot)(
+  document.getElementById("root"),
+  import_react.default.createElement("h1", null, "Client says Hello")
+);
 /*! Bundled license information:
 
 react/cjs/react.development.js:

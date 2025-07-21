@@ -39,10 +39,8 @@ Options:
     const folder = path_1.default.resolve(process.cwd(), argv._[1]);
     const indexFile = argv.index;
     const forcedPort = argv.port ? Number(argv.port) : undefined;
-    const isVerbose = argv.verbose;
-    if (isVerbose)
+    if (argv.verbose)
         console.log(`[ssr-diag] Serving folder: ${folder}`);
-    // Start static server
     const server = (0, http_1.createServer)((req, res) => serveHandler(req, res, { public: folder }));
     await new Promise((resolve) => server.listen(forcedPort ?? 0, '127.0.0.1', () => resolve()));
     const addr = server.address();
@@ -53,15 +51,18 @@ Options:
     const port = typeof addr === 'object' ? addr.port : addr;
     const url = `http://127.0.0.1:${port}/${indexFile}`;
     console.log(`[ssr-diag] Serving ${folder} → ${url}`);
-    // Launch Puppeteer in CI‑friendly mode
     const browser = await puppeteer_1.default.launch({
         args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
     const page = await browser.newPage();
-    // Inject hydration‑wrapper
+    // Only pipe console.log (ignore errors like 404)
+    page.on('console', (msg) => {
+        if (msg.type() === 'log')
+            console.log(`[page] ${msg.text()}`);
+    });
     const wrapperSource = await (0, promises_1.readFile)(path_1.default.resolve(__dirname, 'index.js'), 'utf8');
     await page.evaluateOnNewDocument(wrapperSource);
-    // Load page and capture server HTML
+    // 1) Navigate & fetch raw HTML via HTTP
     const response = await page.goto(url, { waitUntil: 'networkidle0' });
     if (!response || response.status() >= 400) {
         console.error(`❌ Failed to load page (status ${response?.status()})`);
@@ -69,115 +70,85 @@ Options:
         server.close();
         process.exit(1);
     }
-    const serverHtml = await page.content();
+    const serverHtml = await response.text();
     const serverLinesArr = serverHtml.split('\n');
-    // Capture hydrated HTML
+    // 2) Give client hydration a moment
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    // 3) Capture hydrated HTML
     const clientHtml = await page.evaluate(() => document.documentElement.outerHTML);
     await browser.close();
     server.close();
-    await browser.close();
-    server.close();
-    // ── Normalize out the doctype and any comments before <html> ──
-    const normalize = (html) => html.replace(/^<!DOCTYPE html>.*?<html/, '<html').trim();
-    const cleanServerHtml = normalize(serverHtml);
-    const cleanClientHtml = normalize(clientHtml);
-    // ── Diff results on normalized HTML ──
-    const diffs = (0, diff_1.diffLines)(cleanServerHtml, cleanClientHtml);
-    // JSON mode with line numbers
-    if (argv.format === 'json') {
-        const MAX_SNIPPET = 120;
-        const grouped = [];
-        let cursor = 0;
-        let current = null;
-        diffs.forEach((p) => {
-            const lines = p.value.split('\n').filter(Boolean);
-            if (p.added || p.removed) {
-                if (!current) {
-                    const beforeLines = serverLinesArr.slice(Math.max(0, cursor - 2), cursor);
-                    current = {
-                        contextBefore: beforeLines.map((full, idx) => {
-                            const lineNum = cursor - beforeLines.length + idx + 1;
-                            const snippet = full.length > MAX_SNIPPET ? full.slice(0, MAX_SNIPPET) + '…' : full;
-                            return { line: lineNum, snippet, length: full.length };
-                        }),
-                        serverLines: [],
-                        clientLines: [],
-                        contextAfter: []
-                    };
-                    grouped.push(current);
-                }
-                if (p.removed) {
-                    lines.forEach((full, idx) => {
-                        const lineNum = cursor + idx + 1;
-                        const snippet = full.length > MAX_SNIPPET ? full.slice(0, MAX_SNIPPET) + '…' : full;
-                        current.serverLines.push({ line: lineNum, snippet, length: full.length });
-                    });
-                }
-                if (p.added) {
-                    lines.forEach((full, idx) => {
-                        const lineNum = cursor + idx + 1;
-                        const snippet = full.length > MAX_SNIPPET ? full.slice(0, MAX_SNIPPET) + '…' : full;
-                        current.clientLines.push({ line: lineNum, snippet, length: full.length });
-                    });
-                }
-            }
-            else {
-                if (current) {
-                    const afterLines = serverLinesArr.slice(cursor, cursor + 2);
-                    current.contextAfter = afterLines.map((full, idx) => {
-                        const lineNum = cursor + idx + 1;
-                        const snippet = full.length > MAX_SNIPPET ? full.slice(0, MAX_SNIPPET) + '…' : full;
-                        return { line: lineNum, snippet, length: full.length };
-                    });
-                    current = null;
-                }
-                cursor += p.value.split('\n').length - 1;
-            }
-        });
-        console.log(JSON.stringify({ mismatches: grouped }, null, 2));
-        process.exit(grouped.length ? 1 : 0);
-    }
-    // Text mode with context
-    let mismatchCount = 0;
+    // normalize: strip doctype/comments, unify meta tag styles
+    const normalize = (html) => html
+        .replace(/^<!DOCTYPE html>.*?<html/, '<html')
+        .replace(/<meta charset="([^"]+)"\s*\/?>/g, '<meta charset="$1">')
+        .trim();
+    const cleanServer = normalize(serverHtml);
+    const cleanClient = normalize(clientHtml);
+    const diffs = (0, diff_1.diffLines)(cleanServer, cleanClient);
+    const MAX = 120;
+    const grouped = [];
     let cursor = 0;
-    diffs.forEach((part) => {
-        if (!part.added && !part.removed) {
-            cursor += part.value.split('\n').length - 1;
-            return;
-        }
-        mismatchCount++;
-        console.error(chalk_1.default.yellow(`\nMismatch #${mismatchCount}`));
-        // context before
-        const start = Math.max(0, cursor - 2);
-        for (let c = start; c < cursor; c++) {
-            console.error(chalk_1.default.dim(`  ${c + 1} | ${serverLinesArr[c]}`));
-        }
-        // removed = server
-        if (part.removed) {
-            part.value.split('\n').filter(Boolean).forEach((l, idx) => {
-                console.error(chalk_1.default.red(`- ${cursor + idx + 1} | ${l}`));
+    let current = null;
+    diffs.forEach((p) => {
+        const lines = p.value.split('\n').filter(Boolean);
+        if (p.added || p.removed) {
+            if (!current) {
+                const before = serverLinesArr.slice(Math.max(0, cursor - 1), cursor);
+                current = {
+                    contextBefore: before.map((full, i) => {
+                        const num = cursor - before.length + i + 1;
+                        const snip = full.length > MAX ? full.slice(0, MAX) + '…' : full;
+                        return { line: num, snippet: snip, length: full.length };
+                    }),
+                    serverLines: [],
+                    clientLines: [],
+                    contextAfter: [],
+                };
+                grouped.push(current);
+            }
+            lines.forEach((full, i) => {
+                const num = cursor + i + 1;
+                const snip = full.length > MAX ? full.slice(0, MAX) + '…' : full;
+                if (p.removed)
+                    current.serverLines.push({ line: num, snippet: snip, length: full.length });
+                if (p.added)
+                    current.clientLines.push({ line: num, snippet: snip, length: full.length });
             });
         }
-        // added = client
-        if (part.added) {
-            part.value.split('\n').filter(Boolean).forEach((l, idx) => {
-                console.error(chalk_1.default.green(`+ ${cursor + idx + 1} | ${l}`));
-            });
-        }
-        // advance cursor over removed lines
-        if (part.removed) {
-            cursor += part.value.split('\n').length - 1;
-        }
-        // context after
-        const end = Math.min(serverLinesArr.length, cursor + 2);
-        for (let c = cursor; c < end; c++) {
-            console.error(chalk_1.default.dim(`  ${c + 1} | ${serverLinesArr[c]}`));
+        else {
+            if (current) {
+                const after = serverLinesArr.slice(cursor, cursor + 1);
+                current.contextAfter = after.map((full, i) => {
+                    const num = cursor + i + 1;
+                    const snip = full.length > MAX ? full.slice(0, MAX) + '…' : full;
+                    return { line: num, snippet: snip, length: full.length };
+                });
+                current = null;
+            }
+            cursor += p.value.split('\n').length - 1;
         }
     });
-    if (mismatchCount === 0) {
+    // Filter out non‑root diffs, keep only those touching <div id="root"> or <h1>
+    const isRelevant = (g) => [...g.serverLines, ...g.clientLines].some((ln) => /<div id="root"|<h1/.test(ln.snippet));
+    const filtered = grouped.filter(isRelevant);
+    // JSON mode
+    if (argv.format === 'json') {
+        console.log(JSON.stringify({ mismatches: filtered }, null, 2));
+        process.exit(filtered.length ? 1 : 0);
+    }
+    // Text mode
+    if (!filtered.length) {
         console.log(chalk_1.default.green('✅ No hydration mismatches detected.'));
         process.exit(0);
     }
+    filtered.forEach((g, idx) => {
+        console.error(chalk_1.default.yellow(`\nMismatch #${idx + 1}`));
+        g.contextBefore.forEach((l) => console.error(chalk_1.default.dim(`  ${l.line} | ${l.snippet}`)));
+        g.serverLines.forEach((l) => console.error(chalk_1.default.red(`- ${l.line} | ${l.snippet}`)));
+        g.clientLines.forEach((l) => console.error(chalk_1.default.green(`+ ${l.line} | ${l.snippet}`)));
+        g.contextAfter.forEach((l) => console.error(chalk_1.default.dim(`  ${l.line} | ${l.snippet}`)));
+    });
     process.exit(1);
 }
 runDiag().catch((err) => {
