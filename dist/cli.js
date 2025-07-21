@@ -51,7 +51,9 @@ Options:
     const url = `http://127.0.0.1:${port}/${indexFile}`;
     console.log(`[ssr-diag] Serving ${folder} → ${url}`);
     // Puppeteer
-    const browser = await puppeteer_1.default.launch();
+    const browser = await puppeteer_1.default.launch({
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
     const page = await browser.newPage();
     // Inject hydration‑wrapper
     const wrapperSource = await (0, promises_1.readFile)(path_1.default.resolve(__dirname, 'index.js'), 'utf8');
