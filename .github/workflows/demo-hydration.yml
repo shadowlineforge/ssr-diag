@@ -1,11 +1,10 @@
-name: Hydration Check Suite
+name: Demo Hydration Check
 on: [push]
 
 jobs:
   demo:
-    name: Demo (always allowed to fail)
+    name: Demo (must detect mismatches)
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout repository
@@ -22,32 +21,12 @@ jobs:
       - name: Build CLI
         run: npm run build
 
-      - name: Run demo hydration (expected to show failure)
-        run: node dist/cli.js run demo
-
-  check-prod:
-    name: Check Real SSR Build
-    runs-on: ubuntu-latest
-    # always runs, regardless of demo result
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '16'
-
-      - name: Build SSR output (placeholder)
+      - name: Run demo hydration (expect mismatches)
         run: |
-          npm run build:ssr || echo "No build:ssr script—skipping real SSR build"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build CLI
-        run: npm run build
-
-      - name: Run hydration check on real output
-        run: node dist/cli.js run path/to/your/real-out-folder
+          if node dist/cli.js run demo; then
+            echo "❌ Demo did NOT detect any mismatches – this is unexpected!"
+            exit 1
+          else
+            echo "✅ Demo detected mismatches as expected."
+            exit 0
+          fi
