@@ -1,2 +1,8 @@
-.github/workflows/*.yml text eol=lf
+# enforce LF for JavaScript/TypeScript
+*.ts text eol=lf
+*.js text eol=lf
+
+# enforce LF for YAML, Markdown, JSON
 *.yml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
