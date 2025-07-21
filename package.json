@@ -18,6 +18,7 @@
     "cross-spawn": "^7.0.6",
     "debug": "^4.4.1",
     "deep-is": "^0.1.4",
+    "diff": "^8.0.2",
     "escape-string-regexp": "^4.0.0",
     "eslint-scope": "^8.4.0",
     "eslint-visitor-keys": "^4.2.1",
@@ -37,6 +38,7 @@
     "glob-parent": "^6.0.2",
     "globals": "^14.0.0",
     "has-flag": "^4.0.0",
+    "http": "^0.0.1-security",
     "ignore": "^5.3.2",
     "import-fresh": "^3.3.1",
     "imurmurhash": "^0.1.4",
@@ -52,6 +54,7 @@
     "locate-path": "^6.0.0",
     "lodash.merge": "^4.6.2",
     "minimatch": "^3.1.2",
+    "minimist": "^1.2.8",
     "ms": "^2.1.3",
     "natural-compare": "^1.4.0",
     "optionator": "^0.9.4",
@@ -63,9 +66,11 @@
     "prelude-ls": "^1.2.1",
     "prettier-linter-helpers": "^1.0.0",
     "punycode": "^2.3.1",
+    "puppeteer": "^24.14.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "resolve-from": "^4.0.0",
+    "serve-handler": "^6.1.6",
     "shebang-command": "^2.0.0",
     "shebang-regex": "^3.0.0",
     "strip-json-comments": "^3.1.1",
@@ -79,17 +84,24 @@
     "yocto-queue": "^0.1.0"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/jsdom": "^21.1.7",
+    "@types/minimist": "^1.2.5",
     "@types/node": "^24.0.15",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "esbuild": "^0.25.8",
     "eslint": "^9.31.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.3",
+    "jest": "^30.0.4",
+    "jsdom": "^26.1.0",
     "prettier": "^3.6.2",
+    "ts-jest": "^29.4.0",
     "typescript": "^5.8.3"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest --passWithNoTests",
     "build": "tsc",
     "lint": "eslint 'src/**/*.{ts,js}'",
     "format": "prettier --write 'src/**/*.{ts,js,json,md}'",
@@ -98,5 +110,8 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "description": "",
+  "bin": {
+    "ssr-diag": "dist/cli.js"
+  }
 }

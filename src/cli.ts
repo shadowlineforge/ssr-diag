@@ -1,3 +1,106 @@
 #!/usr/bin/env node
-console.log('ssr-diag CLI v0.1.0');
-// TODO: accept <path-to-app>, launch Puppeteer, listen for mismatch
+import path from 'path';
+import { createServer } from 'http';
+const serveHandler: any = require('serve-handler');
+import puppeteer from 'puppeteer';
+import { diffLines } from 'diff';
+import { readFile } from 'fs/promises';
+import minimist from 'minimist';
+
+async function runDiag() {
+  const argv = minimist(process.argv.slice(2), {
+    alias: { h: 'help', i: 'index', p: 'port', v: 'verbose' },
+    boolean: ['help', 'verbose'],
+    string: ['index', 'port'],
+    default: { index: 'index.html' }
+  });
+
+  if (argv.help || argv._[0] !== 'run' || !argv._[1]) {
+    console.log(`
+Usage: ssr-diag run <path> [options]
+
+Commands:
+  run <path>          Scan the SSR output folder at <path> for hydration mismatches
+
+Options:
+  -h, --help          Show this help message and exit
+  -i, --index <file>  Name of the HTML file to serve (default: index.html)
+  -p, --port <num>    Port for static server (default: random)
+  -v, --verbose       Print extra debug information
+    `);
+    process.exit(argv.help ? 0 : 1);
+  }
+
+  const folder = path.resolve(process.cwd(), argv._[1] as string);
+  const indexFile = argv.index as string;
+  const forcedPort = argv.port ? Number(argv.port) : undefined;
+  const isVerbose = argv.verbose as boolean;
+
+  if (isVerbose) console.log(`[ssr-diag] Serving folder: ${folder}`);
+
+  // Start static server
+  const server = createServer((req, res) =>
+    serveHandler(req, res, { public: folder })
+  );
+  await new Promise<void>(resolve =>
+    server.listen(forcedPort ?? 0, '127.0.0.1', () => resolve())
+  );
+
+  const addr = server.address();
+  if (!addr) {
+    console.error('❌ Failed to start static server');
+    process.exit(1);
+  }
+  const port = typeof addr === 'object' ? addr.port : addr;
+  const url = `http://127.0.0.1:${port}/${indexFile}`;
+
+  console.log(`[ssr-diag] Serving ${folder} → ${url}`);
+
+  // Puppeteer
+  const browser = await puppeteer.launch();
+  const page = await browser.newPage();
+
+  // Inject hydration‑wrapper
+  const wrapperSource = await readFile(path.resolve(__dirname, 'index.js'), 'utf8');
+  await page.evaluateOnNewDocument(wrapperSource);
+
+  // Load page and grab pre‑hydrate HTML
+  const response = await page.goto(url, { waitUntil: 'networkidle0' });
+  if (!response || response.status() >= 400) {
+    console.error(`❌ Failed to load page (status ${response?.status()})`);
+    await browser.close();
+    server.close();
+    process.exit(1);
+  }
+  const serverHtml = await page.content();
+
+  // Grab hydrated HTML
+  const clientHtml: string = await page.evaluate(
+    () => document.documentElement.outerHTML
+  );
+
+  await browser.close();
+  server.close();
+
+  // Diff and report
+  const diffs = diffLines(serverHtml, clientHtml);
+  const changes = diffs.filter(p => p.added || p.removed);
+  if (changes.length === 0) {
+    console.log('✅ No hydration mismatches detected.');
+    process.exit(0);
+  }
+
+  console.error('❌ Hydration mismatches found:');
+  diffs.forEach(part => {
+    const prefix = part.added ? '+' : part.removed ? '-' : ' ';
+    part.value.split('\n').forEach(line => {
+      if (line) console.error(`${prefix} ${line}`);
+    });
+  });
+  process.exit(1);
+}
+
+runDiag().catch(err => {
+  console.error('[ssr-diag] Unexpected error:', err);
+  process.exit(1);
+});
